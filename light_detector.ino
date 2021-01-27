@@ -3,7 +3,7 @@ int light1=0;
 
 void setup() {
   // put your setup code here, to run once:
-  Serial.begin(38400);
+  Serial.begin(57600);
 }
 
 void loop() {

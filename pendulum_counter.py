@@ -3,48 +3,60 @@ import serial
 import datetime
 import re
 import numpy as np
+import time
 
+# Set up lists for parsing loop:
+num_lights = 2
+light_strings = []
+Thresholds = np.ones((1,num_lights))*1000 # Starting value
+counters = np.zeros((1,num_lights))
+read_timestamps = np.zeros((1,num_lights))
+prev_timestamps = np.zeros((1,num_lights))
+# Counters to keep track of number of good records read:
+
+for i in range(num_lights):
+    light_strings.append('Light' + str(i))
 
 # Regular Expression for parsing byte string from USB:
 p = re.compile(r'Light\d\=\d+')
 
 # Calibration initialization:
-Threshold0 = 190  # Nominal values;  exact values determined by calibration
-Threshold1 = 190
+nominal_halfperiod = 0.0036
 first_time = True
 calibrate = True
-num_cal_samples = 500
-cal_array = np.zeros((1,num_cal_samples))
+num_cal_samples = 200
+cal_array = np.zeros((num_lights,num_cal_samples))
 cal_count = 0
 
-# Read USB port for data coming from Arduino:
-ser = serial.Serial(port="/dev/ttyACM0",baudrate=38400, timeout=1)
+sep ='\t'
 
-# Counters to keep track of number of good records read:
-counter0 = 0
-counter1 = 0
+# Read USB port for data coming from Arduino:
+ser = serial.Serial(port="/dev/ttyACM0",baudrate=57600, timeout=1)
+
+myvals = np.zeros((1,num_lights))
+prev_vals = np.zeros((1,num_lights))
+
+timestamp = datetime.datetime.now().isoformat()
+fpraw = open('pcountraw-'+timestamp+'.txt',mode='wt')
 
 while(True):
     try:
         record = {}
         bytedata = ser.readline()
-        print('raw: ',bytedata)
+        current_read_timestamp = float(time.time())
         bytestr = str(bytedata)
-        if 'Light0' in bytestr and 'Light1' in bytestr:
-            m=p.findall(bytestr)
-            kv=m[0].split('=')
-            k0=kv[0]
-            v0=int(kv[1])
-            kv=m[1].split('=')
-            k1=kv[0]
-            v1=int(kv[1])
-            if first_time:
-                first_time = False
-                prev_v0 = v0
-                prev_v1 = v1
+        fpraw.write(bytestr)
+        if 'Light' in bytestr:
+            matches=p.findall(bytestr)  # Use regex to find key/value pairs
+            if len(matches) != num_lights:
+                raise ValueError
+            for i in range(num_lights):
+                kv=matches[i].split('=')
+#                mykey=kv[0]
+                myvals[0,i] = int(kv[1])
+                read_timestamps[0,i] = current_read_timestamp
         else:
             raise(ValueError)
-
     except ValueError:
         print("ValueError\n")
         continue
@@ -52,40 +64,65 @@ while(True):
         print("IndexError\n")
         continue
     except KeyboardInterrupt:
-        fp.write('End data stream\n*****\n')
-        fp.close()
+        if fp!=[]:
+            for i in range(num_lights):
+#                fp[i].write('End data stream\n*****\n')
+                fp[i].close()
+                fpraw.close()
+
         quit()
     else:
         if calibrate:         # Only executed upon startup
-            cal_array[0,cal_count] = v0
+            for i in range(num_lights):
+                cal_array[i,cal_count] = myvals[0,i]
+                print('Calibration value: ',cal_count,myvals[0,i])
             cal_count += 1
-            if cal_count == num_cal_samples:
+            if cal_count >= num_cal_samples:
                 calibrate = False
-                calmax = np.max(cal_array)
-                calmin = np.min(cal_array)
-                Threshold0 = calmin + 2.0
-                print('Calibration Complete: Threshold=',Threshold0,'\n')
+                calmax = np.max(cal_array, axis=1)
+                calmin = np.min(cal_array,axis=1)
+                Thresholds = calmin + 2.0
+                print('Calibration Complete: Threshold=',Thresholds,'\n')
                 print('Cal max= ',calmax)
-                startans = input('Start? (y/n)')
+                startans = input('Start? (y/n): ')
+
                 if startans != 'y':
+                    fpraw.close()
                     quit()
                 else:
                     # open file to write data:
-                    fp=open('pendcount.csv',mode='at')
-                    fp.write('*****\nRestart: '+datetime.datetime.now().isoformat()+\
-                                '\nThreshold0='+str(Threshold0)+'\tThreshold1='+str(Threshold1)+'\n\n')
+                    fp = []
+                    metafp = []
+                    for i in range(num_lights):
+                        metafp.append(open('pendcount'+str(i)+'-'+ timestamp +'.txt',mode='wt'))
+                        fp.append(open('pendcount'+str(i)+'-'+ timestamp + '.csv',mode='wt'))
+                    for i in range(num_lights):
+                        fp[i].write(sep.join(\
+                            ['Time','Time Delta','Run Avg','Light Value','Delta Value','Count'])+'\n')
+                        metafp[i].write('*****\nRestart: '+datetime.datetime.now().isoformat()+'\n')
+                        metafp[i].write('Threshold = '+str(Thresholds[i])+'\n')
+                        metafp[i].close()
 
-        else:
-            if  v0 < Threshold0 and prev_v0>=Threshold0:
-                counter0 += 1
-                prev_v0 = v0
-            if  v1 < Threshold1:
-                counter1 += 1
-            sep = '\t'
-            record = datetime.datetime.now().isoformat() + '\t' + sep.join([str(v0),str(counter0),\
-                        str(v1), str(counter1)])
-            print(record)
-            fp.write(record+'\n')
-            prev_v0 = v0
-            prev_v1 = v1
+        else:  # Not calibrate:
+            
+            for i in range(num_lights):
+                if  myvals[0,i] < Thresholds[i] and prev_vals[0,i]>=Thresholds[i]: 
+                    counters[0,i] += 1
+                    if first_time:
+                        delta_t = 0.0
+                        delta_val = 0.0
+                        ravg = nominal_halfperiod
+                        first_time = False
+                    else:
+                        delta_t = read_timestamps[0,i] - prev_timestamps[0,i]
+                        delta_val = myvals[0,i] - prev_vals[0,i]
+                        ravg = ravg + 1/counters[0,i] * (delta_t - ravg)
+
+                    record = sep.join([str(read_timestamps[0,i]),str(delta_t),str(ravg),\
+                        str(myvals[0,i]),str(delta_val),str(counters[0,i])])
+#                    print(record)
+                    fp[i].write(record+'\n')
+                    print('Records written to ',str(i),str(counters[0,i]))
+                prev_timestamps[0,i] = read_timestamps[0,i]
+                prev_vals[0,i] = myvals[0,i]
 
