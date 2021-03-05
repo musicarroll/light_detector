@@ -52,3 +52,15 @@ Delta Times between Local Minima:
 [0.00835848 1.4297657  0.49916959 0.01641154 0.89330888 3.50279951
  0.71530414 0.656178   1.42130804 0.01563644 1.41354823 0.93014121
  1.46149731 1.44588923]
+(4899,)
+Mean Time Delta for Light  0 :  0.007450975333215947
+Stdev Time Delta for Light  0 :  0.001417560696483535
+(4899,)
+Mean Time Delta for Light  1 :  0.007450975333215947
+Stdev Time Delta for Light  1 :  0.001417560696483535
+(4899,)
+Mean Time Delta for Light  2 :  0.007450975333215947
+Stdev Time Delta for Light  2 :  0.001417560696483535
+(4899,)
+Mean Time Delta for Light  3 :  0.007450975333215947
+Stdev Time Delta for Light  3 :  0.001417560696483535
